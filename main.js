@@ -49,6 +49,20 @@ const icMi = (url) => IC_ALANLAR.includes(alan(url));
 // Etiket/barkod yazdırma pencereleri boş sayfa açıp içine yazıyor (BarcodeModal,
 // print-barcode). Belge/PDF önizlemeleri blob: adresiyle açılıyor.
 const yazdirmaMi = (url) => url === "" || url === "about:blank" || url.startsWith("blob:") || url.startsWith("data:");
+// Sistemdeki uygulamaya giden bağlantılar: web (tarayıcı), tel: (telefon
+// uygulaması — Teslim Edilemeyenler'deki "Ara"), mailto:, sms:, whatsapp:.
+// Önceden yalnızca http(s) dışarı açılıyordu; "Ara" sessizce hiçbir şey yapmıyordu.
+const disaAcilir = (url) => /^(https?|tel|mailto|sms|whatsapp):/i.test(url);
+// Chromium tel:/mailto: tıklamasında gezinme olayını iki kez tetikliyor
+// (ölçüldü) — telefon uygulaması iki kez açılmasın.
+let sonDisAcilan = { url: "", an: 0 };
+function disariAc(url) {
+  if (!disaAcilir(url)) return;
+  const simdi = Date.now();
+  if (url === sonDisAcilan.url && simdi - sonDisAcilan.an < 1500) return;
+  sonDisAcilan = { url, an: simdi };
+  shell.openExternal(url);
+}
 
 // ── Pencere konumu/boyutu: kapatırken kaydet, açarken geri yükle ──────────
 const durumDosyasi = () => path.join(app.getPath("userData"), "pencere.json");
@@ -348,14 +362,14 @@ function baglantilariYonet(wc) {
         },
       };
     }
-    if (/^https?:/.test(url)) shell.openExternal(url);
+    disariAc(url);
     return { action: "deny" };
   });
 
   wc.on("will-navigate", (e, url) => {
     if (icMi(url) || url.startsWith("file:")) return;
     e.preventDefault();
-    if (/^https?:/.test(url)) shell.openExternal(url);
+    disariAc(url);
   });
 }
 
