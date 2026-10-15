@@ -1,0 +1,54 @@
+{
+  "name": "yolliyo-masaustu",
+  "productName": "Yolliyo",
+  "version": "1.1.0",
+  "description": "Yolliyo paneli masaüstü uygulaması",
+  "main": "main.js",
+  "author": "Yolliyo",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "ikon": "electron ikon-uret.js",
+    "dist": "electron-builder --win nsis --publish never",
+    "yayinla": "electron-builder --win nsis --publish always"
+  },
+  "build": {
+    "appId": "com.yolliyo.panel",
+    "productName": "Yolliyo",
+    "files": [
+      "main.js",
+      "ayarlar.js",
+      "bildirim.js",
+      "rozet.js",
+      "guncelleme.js",
+      "cevrimdisi.html",
+      "build/icon.png"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Yolliyo"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ataomrcn",
+        "repo": "yolliyo-masaustu",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

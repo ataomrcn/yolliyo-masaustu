@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Yolliyo — Bağlantı yok</title>
+<style>
+  body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: "Segoe UI", system-ui, sans-serif; background: #fff; color: #111; }
+  .kutu { text-align: center; max-width: 420px; padding: 24px; }
+  .y { font-size: 56px; font-weight: 800; color: #F5A623; line-height: 1; }
+  h1 { font-size: 20px; margin: 16px 0 8px; }
+  p { color: #555; font-size: 14px; line-height: 1.5; margin: 0 0 20px; }
+  button { background: #F5A623; border: 0; color: #111; font-weight: 600; font-size: 14px;
+           padding: 10px 22px; border-radius: 10px; cursor: pointer; }
+  button:hover { filter: brightness(0.95); }
+</style>
+</head>
+<body>
+  <div class="kutu">
+    <div class="y">Y</div>
+    <h1>Yolliyo paneline ulaşılamadı</h1>
+    <p>İnternet bağlantınızı kontrol edin. Bağlantı gelince otomatik olarak tekrar denenir.</p>
+    <button id="tekrar">Tekrar Dene</button>
+  </div>
+<script>
+  const hedef = new URLSearchParams(location.search).get("hedef") || "https://www.yolliyo.com/panel";
+  const git = () => { location.href = hedef; };
+  document.getElementById("tekrar").addEventListener("click", git);
+  window.addEventListener("online", git);
+  setInterval(() => { if (navigator.onLine) git(); }, 15000);
+</script>
+</body>
+</html>
