@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Yolliyo — Hızlı arama</title>
+<style>
+  :root {
+    --yuzey: #171412;
+    --yuzey-ust: #211d1a;
+    --secili: rgba(255, 180, 0, 0.10);
+    --kenar: rgba(255, 245, 230, 0.09);
+    --metin: #f4f1ec;
+    --ikincil: #c6c1b9;
+    --soluk: #8f8a83;
+    --marka: #ffb400;
+  }
+  html, body { margin: 0; background: transparent; }
+  body {
+    font: 14px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    color: var(--metin);
+    padding: 14px 18px 24px; /* gölge için şeffaf pay */
+    user-select: none;
+  }
+  .kutu {
+    background: var(--yuzey);
+    border: 1px solid var(--kenar);
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    animation: gir 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes gir { from { opacity: 0; transform: translateY(-6px) scale(0.985); } to { opacity: 1; transform: none; } }
+  .ust { display: flex; align-items: center; gap: 12px; padding: 0 16px; height: 56px; border-bottom: 1px solid var(--kenar); }
+  .ust svg { width: 19px; height: 19px; color: var(--soluk); flex: none; }
+  input {
+    flex: 1; height: 100%; border: 0; outline: 0; background: transparent; color: var(--metin);
+    font: 400 17px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: text;
+  }
+  input::placeholder { color: #6f6a63; }
+  .yukleniyor { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,245,230,0.12); border-top-color: var(--marka); animation: don 0.7s linear infinite; visibility: hidden; flex: none; }
+  .yukleniyor.acik { visibility: visible; }
+  @keyframes don { to { transform: rotate(360deg); } }
+
+  .liste { max-height: 372px; overflow-y: auto; padding: 6px; }
+  .liste::-webkit-scrollbar { width: 8px; }
+  .liste::-webkit-scrollbar-thumb { background: rgba(255,245,230,0.1); border-radius: 8px; }
+  .satir {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center;
+    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+  }
+  .satir.secili { background: var(--secili); box-shadow: inset 2px 0 0 var(--marka); }
+  .ad { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ad .no { color: var(--soluk); font-weight: 500; margin-left: 6px; }
+  .bilgi { grid-column: 1; font-size: 12.5px; color: var(--soluk); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sag { grid-row: 1 / span 2; grid-column: 2; text-align: right; }
+  .tutar { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .durum { display: inline-block; margin-top: 4px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+
+  .bos { padding: 26px 16px 28px; text-align: center; color: var(--soluk); }
+  .bos b { color: var(--ikincil); }
+  .ipucu { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; }
+  .ipucu span { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--kenar); color: var(--ikincil); }
+
+  .alt {
+    display: flex; gap: 16px; align-items: center; padding: 9px 16px; border-top: 1px solid var(--kenar);
+    font-size: 12px; color: var(--soluk); background: rgba(0,0,0,0.15);
+  }
+  .alt .bosluk { flex: 1; }
+  kbd { font: 11px/1 "Segoe UI", system-ui, sans-serif; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--kenar); color: var(--ikincil); margin-right: 4px; }
+  @media (prefers-reduced-motion: reduce) { .kutu { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="kutu" id="kutu">
+    <div class="ust">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" placeholder="Sipariş, müşteri, telefon ya da takip no…" autocomplete="off" spellcheck="false">
+      <div class="yukleniyor" id="yuk"></div>
+    </div>
+    <div class="liste" id="liste"></div>
+    <div class="alt">
+      <span><kbd>↑</kbd><kbd>↓</kbd> gez</span>
+      <span><kbd>Enter</kbd> aç</span>
+      <span><kbd>Esc</kbd> kapat</span>
+      <span class="bosluk"></span>
+      <span>Yolliyo</span>
+    </div>
+  </div>
+
+<script>
+  const y = window.yolliyo;
+  const q = document.getElementById("q");
+  const liste = document.getElementById("liste");
+  const yuk = document.getElementById("yuk");
+  const kutu = document.getElementById("kutu");
+
+  const DURUM = {
+    pending: ["Yeni", "#ffb400"], ptt: ["PTT", "#c6c1b9"], packed: ["Paketlendi", "#7fb3ef"],
+    processing: ["Gönderime hazır", "#7fb3ef"], shipped: ["Yolda", "#7fb3ef"], delivered: ["Tamamlandı", "#3fc83f"],
+    cancelled: ["İptal", "#8f8a83"], returned: ["İade", "#ec835a"], address_missing: ["Eksik adres", "#fab219"],
+  };
+  const para = (n, c) => { try { return Number(n || 0).toLocaleString("tr-TR", { style: "currency", currency: c || "TRY" }); } catch { return n; } };
+  const tarih = (iso) => iso ? new Date(iso).toLocaleDateString("tr-TR", { day: "numeric", month: "short" }) : "";
+  const kacis = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  let sonuclar = [];
+  let secili = 0;
+  let istekNo = 0;
+  let zamanlayici = null;
+  let bekleyen = false; // yazıldı ama henüz aranmadı
+
+  function boyutBildir() { requestAnimationFrame(() => y.yukseklik(Math.ceil(document.body.scrollHeight))); }
+
+  function ciz() {
+    const metin = q.value.trim();
+    if (metin.length < 2) {
+      liste.innerHTML = `<div class="bos">Aramak için en az 2 karakter yazın
+        <div class="ipucu"><span>Ahmet Yılmaz</span><span>#44399</span><span>0555 123 45 67</span><span>191002483343</span><span>Kadıköy</span></div></div>`;
+    } else if (!sonuclar.length) {
+      liste.innerHTML = `<div class="satir secili" data-i="liste"><div class="ad">“${kacis(metin)}” için sonuç yok</div>
+        <div class="bilgi">Enter ile sipariş listesinde ara</div></div>`;
+    } else {
+      liste.innerHTML = sonuclar.map((o, i) => {
+        const [durumAd, renk] = DURUM[o.status] || [o.status, "#c6c1b9"];
+        const no = o.platform_package_id || o.platform_order_id || "";
+        const bilgi = [o.shipping_district && o.shipping_city ? `${o.shipping_district} / ${o.shipping_city}` : o.shipping_city,
+          o.customer_phone, o.cargo_tracking_number, tarih(o.ordered_at || o.created_at)].filter(Boolean).map(kacis).join(" · ");
+        return `<div class="satir${i === secili ? " secili" : ""}" data-i="${i}">
+          <div class="ad">${kacis(o.customer_name || "İsimsiz")}<span class="no">${kacis(no.startsWith("#") ? no : "#" + no)}</span></div>
+          <div class="sag"><div class="tutar">${para(o.is_cod && o.cod_amount ? o.cod_amount : o.total_amount, o.currency)}</div>
+            <span class="durum" style="color:${renk};background:${renk}1f">${kacis(durumAd)}</span></div>
+          <div class="bilgi">${bilgi}</div>
+        </div>`;
+      }).join("");
+    }
+    liste.querySelector(".secili")?.scrollIntoView({ block: "nearest" });
+    boyutBildir();
+  }
+
+  async function ara() {
+    const metin = q.value.trim();
+    const no = ++istekNo;
+    if (metin.length < 2) { sonuclar = []; secili = 0; yuk.classList.remove("acik"); ciz(); return; }
+    yuk.classList.add("acik");
+    const r = await y.ara(metin);
+    if (no !== istekNo) return; // daha yeni bir arama var
+    yuk.classList.remove("acik");
+    sonuclar = Array.isArray(r) ? r : [];
+    secili = 0;
+    ciz();
+  }
+
+  function sec() {
+    const metin = q.value.trim();
+    if (sonuclar[secili]) y.siparisAc(sonuclar[secili].id);
+    else if (metin.length >= 2) y.listedeAra(metin);
+  }
+
+  q.addEventListener("input", () => {
+    bekleyen = true;
+    clearTimeout(zamanlayici);
+    zamanlayici = setTimeout(() => { bekleyen = false; ara(); }, 180);
+  });
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (sonuclar.length) { secili = (secili + 1) % sonuclar.length; ciz(); } }
+    else if (e.key === "ArrowUp") { e.preventDefault(); if (sonuclar.length) { secili = (secili - 1 + sonuclar.length) % sonuclar.length; ciz(); } }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      // Son yazılanın sonucu gelmeden Enter'a basıldıysa önce ara, sonra aç.
+      if (bekleyen) { clearTimeout(zamanlayici); bekleyen = false; ara().then(sec); } else sec();
+    }
+    else if (e.key === "Escape") { y.kapat(); }
+  });
+  liste.addEventListener("mousemove", (e) => {
+    const s = e.target.closest(".satir"); const i = Number(s?.dataset.i);
+    if (s && !Number.isNaN(i) && i !== secili) { secili = i; ciz(); }
+  });
+  liste.addEventListener("click", (e) => { if (e.target.closest(".satir")) sec(); });
+  // Kutunun dışındaki şeffaf paya tıklamak kapatır
+  document.addEventListener("mousedown", (e) => { if (!kutu.contains(e.target)) y.kapat(); });
+
+  y.gosterildi(() => { q.select(); q.focus(); ciz(); });
+  ciz();
+</script>
+</body>
+</html>

@@ -17,6 +17,7 @@ const VARSAYILAN = {
   bildirimler: true,
   kategoriler: { siparis: true, kargo_sorun: true, whatsapp: true, stok: true, odeme: true, diger: false },
   windowsIleBaslat: true,
+  acilistaDepoEkrani: false, // depo bilgisayarı: Windows açılınca TV ekranı da açılır
   ilkKapatmaUyarisi: false, // "arka planda çalışıyor" bilgisi bir kez gösterildi mi
   sonGorulen: null,         // en son işlenen bildirimin created_at'i
 };

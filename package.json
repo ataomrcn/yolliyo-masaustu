@@ -1,7 +1,7 @@
 {
   "name": "yolliyo-masaustu",
   "productName": "Yolliyo",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Yolliyo paneli masaüstü uygulaması",
   "main": "main.js",
   "author": "Yolliyo",
@@ -19,8 +19,12 @@
       "main.js",
       "ayarlar.js",
       "bildirim.js",
-      "rozet.js",
+      "sayaclar.js",
       "guncelleme.js",
+      "baslik-preload.js",
+      "baslik.html",
+      "arama.html",
+      "acilis.html",
       "cevrimdisi.html",
       "build/icon.png"
     ],

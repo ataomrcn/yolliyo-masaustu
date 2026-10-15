@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Yolliyo</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(420px 260px at 50% 38%, rgba(255,180,0,0.10), transparent 70%), #0a0908;
+    color: #f4f1ec;
+    font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    display: grid; place-items: center;
+    -webkit-app-region: drag; user-select: none; overflow: hidden;
+  }
+  .ic { text-align: center; animation: gir 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .isaret { width: 64px; height: 77px; filter: drop-shadow(0 0 22px rgba(255,180,0,0.35)); animation: nefes 2.4s ease-in-out infinite; }
+  .ad { margin-top: 18px; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  .alt { margin-top: 4px; font-size: 13px; color: #8f8a83; letter-spacing: 0.02em; }
+  .cubuk { position: relative; width: 168px; height: 3px; margin: 26px auto 0; border-radius: 3px; background: rgba(255,245,230,0.08); overflow: hidden; }
+  .cubuk::after {
+    content: ""; position: absolute; inset: 0; width: 40%; border-radius: 3px;
+    background: linear-gradient(90deg, transparent, #ffb400, transparent);
+    animation: kay 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .surum { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 11px; color: #5d5953; }
+  @keyframes kay { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+  @keyframes nefes { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+  @keyframes gir { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .isaret, .cubuk::after, .ic { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="ic">
+    <svg class="isaret" viewBox="0 0 100 120" aria-hidden="true">
+      <path d="M5 5 L30 5 L50 48 L70 5 L95 5 L62 72 L62 115 L38 115 L38 72 Z" fill="#FFB400"/>
+    </svg>
+    <div class="ad">Yolliyo</div>
+    <div class="alt">Siparişten teslimata tek panel</div>
+    <div class="cubuk"></div>
+  </div>
+  <div class="surum" id="surum"></div>
+  <script>
+    const v = new URLSearchParams(location.search).get("surum");
+    if (v) document.getElementById("surum").textContent = "Sürüm " + v;
+  </script>
+</body>
+</html>

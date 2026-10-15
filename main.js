@@ -2,28 +2,39 @@
 //
 // Uygulama panelin kopyası değil: her açılışta canlı paneli yükler, yani
 // panele gelen her güncelleme burada da anında görünür. Giriş bilgisi (oturum
-// çerezi) "persist:yolliyo" bölümünde saklanır; kapatıp açınca tekrar giriş
-// istenmez.
+// çerezi) "persist:yolliyo" bölümünde saklanır.
 //
-// Tarayıcıdan farkı (bu dosya + modüller):
-//   - Kapatınca kapanmaz, sistem tepsisine iner; arka planda çalışmaya devam eder
-//   - Yeni sipariş / kargo sorunu / WhatsApp... Windows bildirimi (bildirim.js)
-//   - Görev çubuğu ikonunda "Yeni" sipariş sayısı (rozet.js)
-//   - Windows açılınca tepside başlar (ayarlardan kapatılabilir)
-//   - Uygulama kabuğu kendini günceller (guncelleme.js)
+// PENCERE YAPISI: Windows'un gri başlık çubuğu yok. Pencere (BaseWindow) iki
+// katmandan oluşur — üstte kendi başlık çubuğumuz (baslik.html: logo, gezinme,
+// arama, sayaçlar), altında panel. Küçült/büyüt/kapat düğmeleri Windows'un
+// kendi düğmeleri (titleBarOverlay), başlık çubuğumuzun sağına çizilir.
+//
+// Modüller:
+//   bildirim.js   Windows bildirimleri
+//   sayaclar.js   Yeni / teslim edilemedi sayıları + görev çubuğu rozeti
+//   guncelleme.js Kendi kendini güncelleme
+//   ayarlar.js    Kullanıcı tercihleri
+// Ek pencereler: açılış ekranı (acilis.html), hızlı arama (arama.html),
+// Depo Ekranı (panelin /depo-ekrani sayfası, tam ekran).
 
-const { app, BrowserWindow, Menu, Tray, nativeImage, shell, session } = require("electron");
+const {
+  app, BaseWindow, BrowserWindow, WebContentsView, Menu, Tray, nativeImage, shell, session,
+  ipcMain, globalShortcut, screen, powerSaveBlocker,
+} = require("electron");
 const path = require("path");
 const fs = require("fs");
 const ayarlar = require("./ayarlar");
 const bildirim = require("./bildirim");
-const rozet = require("./rozet");
+const sayaclar = require("./sayaclar");
 const guncelleme = require("./guncelleme");
 
 const TABAN = "https://www.yolliyo.com";
 const PANEL_URL = `${TABAN}/panel`;
 const BOLUM = "persist:yolliyo";
 const IKON = path.join(__dirname, "build", "icon.png");
+const BASLIK_Y = 44;
+const BASLIK_RENK = "#12100e";
+const ARAMA_KISAYOL = "CommandOrControl+Shift+Y";
 // Windows açılışında --arkaplan ile başlatılır: pencere açılmaz, tepside bekler.
 const ARKAPLAN = process.argv.includes("--arkaplan");
 
@@ -51,14 +62,46 @@ function durumYaz(pencere) {
   } catch { /* önemsiz */ }
 }
 
-let anaPencere = null;
+let anaPencere = null;   // BaseWindow
+let baslikView = null;   // WebContentsView — kendi başlık çubuğumuz
+let panelView = null;    // WebContentsView — panel
+let acilis = null;       // açılış ekranı
+let aramaPencere = null; // hızlı arama
+let depoPencere = null;  // Depo Ekranı (TV)
+let depoUyanik = null;   // powerSaveBlocker kimliği
 let tepsi = null;
 let cikiliyor = false;
 let guncel = null;
+let sayac = null;
+let yukleniyor = false;
 
-function pencereAc({ goster }) {
+const panel = () => panelView?.webContents;
+
+/* ── Ana pencere ─────────────────────────────────────────── */
+
+function yerlesim() {
+  if (!anaPencere || anaPencere.isDestroyed()) return;
+  const { width, height } = anaPencere.getContentBounds();
+  const ust = anaPencere.isFullScreen() ? 0 : BASLIK_Y;
+  baslikView.setBounds({ x: 0, y: 0, width, height: ust });
+  panelView.setBounds({ x: 0, y: ust, width, height: Math.max(0, height - ust) });
+}
+
+function baslikDurumu() {
+  if (!baslikView || baslikView.webContents.isDestroyed()) return;
+  const wc = panel();
+  const s = sayac?.son() ?? { oturum: false, yeni: null, sorunlu: null };
+  baslikView.webContents.send("baslik:durum", {
+    geriVar: Boolean(wc?.navigationHistory.canGoBack()),
+    ileriVar: Boolean(wc?.navigationHistory.canGoForward()),
+    yukleniyor,
+    ...s,
+  });
+}
+
+function pencereAc() {
   const d = durumOku();
-  anaPencere = new BrowserWindow({
+  anaPencere = new BaseWindow({
     width: d?.width ?? 1440,
     height: d?.height ?? 900,
     x: d?.x,
@@ -67,21 +110,34 @@ function pencereAc({ goster }) {
     minHeight: 640,
     title: "Yolliyo",
     icon: IKON,
-    backgroundColor: "#ffffff",
-    autoHideMenuBar: true, // menü Alt tuşuyla görünür
+    backgroundColor: BASLIK_RENK,
     show: false,
-    webPreferences: {
-      partition: BOLUM,
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: BASLIK_RENK, symbolColor: "#c6c1b9", height: BASLIK_Y },
   });
   if (d?.tamEkran) anaPencere.maximize();
-  if (goster) anaPencere.once("ready-to-show", () => anaPencere.show());
+
+  baslikView = new WebContentsView({
+    webPreferences: { preload: path.join(__dirname, "baslik-preload.js"), contextIsolation: true, sandbox: true },
+  });
+  baslikView.setBackgroundColor(BASLIK_RENK);
+  baslikView.webContents.loadFile(path.join(__dirname, "baslik.html"));
+  baslikView.webContents.on("did-finish-load", baslikDurumu);
+
+  panelView = new WebContentsView({
+    webPreferences: { partition: BOLUM, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  panelView.setBackgroundColor("#ffffff");
+
+  anaPencere.contentView.addChildView(panelView);
+  anaPencere.contentView.addChildView(baslikView);
+  yerlesim();
+  for (const olay of ["resize", "maximize", "unmaximize", "enter-full-screen", "leave-full-screen"]) {
+    anaPencere.on(olay, yerlesim);
+  }
 
   // Kapat düğmesi uygulamayı kapatmaz, tepsiye indirir — bildirimler gelmeye
-  // devam etsin. Gerçek çıkış tepsi menüsünden ya da Yolliyo → Çıkış.
+  // devam etsin. Gerçek çıkış tepsi menüsünden ya da Ctrl+Q.
   anaPencere.on("close", (e) => {
     durumYaz(anaPencere);
     if (cikiliyor) return;
@@ -98,29 +154,186 @@ function pencereAc({ goster }) {
   });
   anaPencere.on("closed", () => { anaPencere = null; });
 
-  baglantilariYonet(anaPencere.webContents);
-  anaPencere.webContents.on("did-fail-load", (_e, kod, _aciklama, url, anaCerceve) => {
+  const wc = panel();
+  baglantilariYonet(wc);
+  kisayollar(wc);
+  wc.on("did-start-loading", () => { yukleniyor = true; baslikDurumu(); });
+  wc.on("did-stop-loading", () => { yukleniyor = false; baslikDurumu(); });
+  for (const olay of ["did-navigate", "did-navigate-in-page"]) {
+    wc.on(olay, () => { baslikDurumu(); sayac?.yokla(); });
+  }
+  wc.on("page-title-updated", (_e, baslik) => anaPencere?.setTitle(baslik ? `${baslik}` : "Yolliyo"));
+  wc.on("did-fail-load", (_e, kod, _aciklama, url, anaCerceve) => {
     // -3: kullanıcı/yönlendirme iptali — hata değil
     if (!anaCerceve || kod === -3) return;
-    anaPencere.loadFile(path.join(__dirname, "cevrimdisi.html"), { query: { hedef: url || PANEL_URL } });
+    wc.loadFile(path.join(__dirname, "cevrimdisi.html"), { query: { hedef: url || PANEL_URL } });
   });
 
-  anaPencere.loadURL(PANEL_URL);
+  wc.loadURL(PANEL_URL);
 }
 
 /** Pencereyi gösterir; yol verilirse o panel sayfasını açar. */
 function ac(yol) {
-  if (!anaPencere) pencereAc({ goster: true });
-  if (yol) anaPencere.loadURL(`${TABAN}${yol}`);
+  if (!anaPencere) pencereAc();
+  if (yol) panel().loadURL(`${TABAN}${yol}`);
   if (anaPencere.isMinimized()) anaPencere.restore();
   anaPencere.show();
   anaPencere.focus();
+  panel().focus();
 }
 
 function cik() {
   cikiliyor = true;
   app.quit();
 }
+
+/* ── Açılış ekranı ───────────────────────────────────────── */
+
+function acilisGoster() {
+  acilis = new BrowserWindow({
+    width: 440, height: 300, frame: false, resizable: false, movable: true, show: false,
+    skipTaskbar: false, backgroundColor: "#0a0908", icon: IKON, title: "Yolliyo",
+    webPreferences: { sandbox: true, contextIsolation: true },
+  });
+  acilis.loadFile(path.join(__dirname, "acilis.html"), { query: { surum: app.getVersion() } });
+  acilis.once("ready-to-show", () => acilis?.show());
+  acilis.on("closed", () => { acilis = null; });
+
+  const baslangic = Date.now();
+  let bitti = false;
+  const bitir = () => {
+    if (bitti) return;
+    bitti = true;
+    // En az 0,9 sn göster — anında kapanırsa göz kırpması gibi görünür.
+    setTimeout(async () => {
+      ac();
+      if (!acilis || acilis.isDestroyed()) return;
+      for (let o = 1; o >= 0; o -= 0.1) { acilis?.setOpacity(Math.max(0, o)); await new Promise((r) => setTimeout(r, 16)); }
+      acilis?.destroy();
+    }, Math.max(0, 900 - (Date.now() - baslangic)));
+  };
+  panel().once("did-finish-load", bitir);
+  panel().once("did-fail-load", bitir);
+  setTimeout(bitir, 15_000); // panel çok yavaşsa yine de aç
+}
+
+/* ── Hızlı arama ─────────────────────────────────────────── */
+
+const ARAMA_G = 720;
+
+function aramaHazirla() {
+  aramaPencere = new BrowserWindow({
+    width: ARAMA_G, height: 200, show: false, frame: false, transparent: true, resizable: false,
+    skipTaskbar: true, alwaysOnTop: true, minimizable: false, maximizable: false, fullscreenable: false,
+    hasShadow: false, title: "Yolliyo — Hızlı arama",
+    webPreferences: { preload: path.join(__dirname, "baslik-preload.js"), contextIsolation: true, sandbox: true },
+  });
+  aramaPencere.setAlwaysOnTop(true, "pop-up-menu");
+  aramaPencere.loadFile(path.join(__dirname, "arama.html"));
+  aramaPencere.on("blur", () => aramaPencere?.hide());
+  aramaPencere.on("closed", () => { aramaPencere = null; });
+}
+
+/** @param {"baslik"|"genel"} nereden */
+function aramaAc(nereden) {
+  if (!aramaPencere) aramaHazirla();
+  let x, y;
+  if (nereden === "baslik" && anaPencere?.isVisible()) {
+    const b = anaPencere.getContentBounds();
+    x = Math.round(b.x + (b.width - ARAMA_G) / 2);
+    y = b.y + BASLIK_Y - 10;
+  } else {
+    const ekran = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    x = Math.round(ekran.x + (ekran.width - ARAMA_G) / 2);
+    y = Math.round(ekran.y + ekran.height * 0.18);
+  }
+  aramaPencere.setPosition(x, y);
+  aramaPencere.show();
+  aramaPencere.focus();
+  aramaPencere.webContents.send("arama:gosterildi");
+}
+
+ipcMain.on("arama:ac", (_e, nereden) => aramaAc(nereden === "baslik" ? "baslik" : "genel"));
+ipcMain.on("arama:kapat", () => aramaPencere?.hide());
+ipcMain.on("arama:yukseklik", (_e, px) => {
+  if (!aramaPencere) return;
+  const [x, y] = aramaPencere.getPosition();
+  aramaPencere.setBounds({ x, y, width: ARAMA_G, height: Math.min(640, Math.max(120, Math.round(px))) });
+});
+ipcMain.handle("arama:ara", async (_e, q) => {
+  const metin = String(q ?? "").trim().slice(0, 80);
+  if (metin.length < 2) return [];
+  try {
+    const r = await session.fromPartition(BOLUM).fetch(
+      `${TABAN}/api/orders/search?q=${encodeURIComponent(metin)}`,
+      { credentials: "include", cache: "no-store" },
+    );
+    if (!r.ok) return [];
+    return (await r.json()).orders ?? [];
+  } catch {
+    return [];
+  }
+});
+ipcMain.on("arama:siparis", (_e, id) => {
+  aramaPencere?.hide();
+  if (/^[\w-]{1,64}$/.test(String(id))) ac(`/panel/siparisler/${id}`);
+});
+ipcMain.on("arama:liste", (_e, q) => {
+  aramaPencere?.hide();
+  ac(`/panel/siparisler?q=${encodeURIComponent(String(q ?? "").slice(0, 80))}`);
+});
+
+/* ── Başlık çubuğu eylemleri ─────────────────────────────── */
+
+ipcMain.on("baslik:git", (_e, yol) => { if (typeof yol === "string" && yol.startsWith("/panel")) ac(yol); });
+ipcMain.on("baslik:geri", () => panel()?.navigationHistory.goBack());
+ipcMain.on("baslik:ileri", () => panel()?.navigationHistory.goForward());
+ipcMain.on("baslik:yenile", () => panel()?.reload());
+ipcMain.on("depo-ekrani:ac", () => depoEkraniAc());
+
+/* ── Depo Ekranı (TV modu) ───────────────────────────────── */
+
+/** Birden fazla ekran varsa ana ekran dışındaki en büyüğü (depodaki TV). */
+function depoEkrani() {
+  const birincil = screen.getPrimaryDisplay();
+  const digerleri = screen.getAllDisplays().filter((d) => d.id !== birincil.id);
+  if (!digerleri.length) return birincil;
+  return digerleri.sort((a, b) => b.size.width * b.size.height - a.size.width * a.size.height)[0];
+}
+
+function depoEkraniAc() {
+  if (depoPencere && !depoPencere.isDestroyed()) { depoPencere.show(); depoPencere.focus(); return; }
+  const ekran = depoEkrani();
+  depoPencere = new BrowserWindow({
+    x: ekran.bounds.x, y: ekran.bounds.y, width: ekran.bounds.width, height: ekran.bounds.height,
+    fullscreen: true, autoHideMenuBar: true, backgroundColor: "#0a0908", icon: IKON, title: "Yolliyo — Depo Ekranı",
+    webPreferences: { partition: BOLUM, contextIsolation: true, sandbox: true },
+  });
+  depoPencere.setMenuBarVisibility(false);
+  depoPencere.on("page-title-updated", (e) => e.preventDefault()); // görev çubuğunda "Depo Ekranı" kalsın
+  baglantilariYonet(depoPencere.webContents);
+  // Esc tam ekrandan çıkarır, F11 geri alır; Ctrl+W kapatır.
+  depoPencere.webContents.on("before-input-event", (e, g) => {
+    if (g.type !== "keyDown") return;
+    if (g.key === "Escape" && depoPencere.isFullScreen()) { e.preventDefault(); depoPencere.setFullScreen(false); }
+    else if (g.key === "F11") { e.preventDefault(); depoPencere.setFullScreen(!depoPencere.isFullScreen()); }
+    else if (g.key.toLowerCase() === "w" && g.control) { e.preventDefault(); depoPencere.close(); }
+  });
+  depoPencere.webContents.on("did-fail-load", (_e, kod, _a, url, anaCerceve) => {
+    if (!anaCerceve || kod === -3) return;
+    depoPencere.loadFile(path.join(__dirname, "cevrimdisi.html"), { query: { hedef: url || `${TABAN}/depo-ekrani` } });
+  });
+  depoPencere.loadURL(`${TABAN}/depo-ekrani`);
+  // Ekran açıkken monitör uykuya geçmesin.
+  depoUyanik = powerSaveBlocker.start("prevent-display-sleep");
+  depoPencere.on("closed", () => {
+    if (depoUyanik != null && powerSaveBlocker.isStarted(depoUyanik)) powerSaveBlocker.stop(depoUyanik);
+    depoUyanik = null;
+    depoPencere = null;
+  });
+}
+
+/* ── Bağlantılar ve kısayollar ───────────────────────────── */
 
 /** Pencere içi gezinti ve yeni pencere isteklerini yönetir. */
 function baglantilariYonet(wc) {
@@ -148,10 +361,36 @@ function baglantilariYonet(wc) {
 
 // Uygulama içinde açılan yazdırma/önizleme pencereleri de aynı kurallarla.
 app.on("web-contents-created", (_e, wc) => {
-  if (wc.getType() === "window") baglantilariYonet(wc);
+  if (wc.getType() === "window" && wc !== aramaPencere?.webContents) baglantilariYonet(wc);
 });
 
-/** Windows açılışında başlatma — kurulu sürümde geçerli. */
+/**
+ * Panel kısayolları. Başlık çubuğu gizli olduğu için uygulama menüsü yok;
+ * kısayollar doğrudan panel katmanında yakalanır. Kopyala/yapıştır gibi
+ * düzenleme kısayollarını Chromium kendisi yapıyor.
+ */
+function kisayollar(wc) {
+  wc.on("before-input-event", (e, g) => {
+    if (g.type !== "keyDown") return;
+    const k = g.key.toLowerCase();
+    const ctrl = g.control || g.meta;
+    let yap = null;
+    if (g.key === "F5" || (ctrl && k === "r")) yap = () => wc.reload();
+    else if (g.alt && g.key === "ArrowLeft") yap = () => wc.navigationHistory.goBack();
+    else if (g.alt && g.key === "ArrowRight") yap = () => wc.navigationHistory.goForward();
+    else if (ctrl && k === "w") yap = () => anaPencere?.close();
+    else if (ctrl && k === "q") yap = cik;
+    else if (ctrl && (k === "=" || k === "+")) yap = () => wc.setZoomLevel(wc.getZoomLevel() + 0.5);
+    else if (ctrl && k === "-") yap = () => wc.setZoomLevel(wc.getZoomLevel() - 0.5);
+    else if (ctrl && k === "0") yap = () => wc.setZoomLevel(0);
+    else if (g.key === "F11") yap = () => anaPencere?.setFullScreen(!anaPencere.isFullScreen());
+    else if (g.key === "F12" || (ctrl && g.shift && k === "i")) yap = () => wc.toggleDevTools();
+    if (yap) { e.preventDefault(); yap(); }
+  });
+}
+
+/* ── Windows ile başlama, tepsi ──────────────────────────── */
+
 function windowsIleBaslat(acik) {
   ayarlar.yaz({ windowsIleBaslat: acik });
   if (!app.isPackaged) return;
@@ -163,6 +402,9 @@ function tepsiMenusu() {
   const hazir = guncel?.hazir();
   return Menu.buildFromTemplate([
     { label: "Yolliyo'yu Aç", click: () => ac() },
+    { label: "Hızlı arama\tCtrl+Shift+Y", click: () => aramaAc("genel") },
+    { label: "Depo Ekranı (TV)", click: depoEkraniAc },
+    { type: "separator" },
     { label: "Yeni Siparişler", click: () => ac("/panel/siparisler") },
     { label: "Teslim Edilemeyenler", click: () => ac("/panel/teslim-edilemeyen") },
     { type: "separator" },
@@ -183,8 +425,17 @@ function tepsiMenusu() {
       ],
     },
     {
-      label: "Windows açılınca başlat", type: "checkbox", checked: a.windowsIleBaslat,
-      click: (m) => { windowsIleBaslat(m.checked); tepsiYenile(); },
+      label: "Başlangıç",
+      submenu: [
+        {
+          label: "Windows açılınca başlat", type: "checkbox", checked: a.windowsIleBaslat,
+          click: (m) => { windowsIleBaslat(m.checked); tepsiYenile(); },
+        },
+        {
+          label: "Açılışta Depo Ekranını aç (depo bilgisayarı)", type: "checkbox", checked: a.acilistaDepoEkrani,
+          click: (m) => { ayarlar.yaz({ acilistaDepoEkrani: m.checked }); tepsiYenile(); },
+        },
+      ],
     },
     { type: "separator" },
     hazir
@@ -209,48 +460,7 @@ function tepsiKur() {
   tepsi.on("click", () => ac());
 }
 
-function menuKur() {
-  const yenile = () => BrowserWindow.getFocusedWindow()?.webContents.reload();
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    {
-      label: "Yolliyo",
-      submenu: [
-        { label: "Panele Git", accelerator: "CmdOrCtrl+H", click: () => ac("/panel") },
-        { label: "Yenile", accelerator: "CmdOrCtrl+R", click: yenile },
-        { label: "Yenile", accelerator: "F5", click: yenile, visible: false },
-        { type: "separator" },
-        { label: "Pencereyi Kapat (arka planda çalışır)", accelerator: "CmdOrCtrl+W", click: () => anaPencere?.hide() },
-        { label: "Çıkış", accelerator: "CmdOrCtrl+Q", click: cik },
-      ],
-    },
-    {
-      label: "Düzen",
-      submenu: [
-        { label: "Geri Al", role: "undo" },
-        { label: "Yinele", role: "redo" },
-        { type: "separator" },
-        { label: "Kes", role: "cut" },
-        { label: "Kopyala", role: "copy" },
-        { label: "Yapıştır", role: "paste" },
-        { label: "Tümünü Seç", role: "selectAll" },
-      ],
-    },
-    {
-      label: "Görünüm",
-      submenu: [
-        { label: "Geri", accelerator: "Alt+Left", click: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goBack() },
-        { label: "İleri", accelerator: "Alt+Right", click: () => BrowserWindow.getFocusedWindow()?.webContents.navigationHistory.goForward() },
-        { type: "separator" },
-        { label: "Yakınlaştır", role: "zoomIn" },
-        { label: "Uzaklaştır", role: "zoomOut" },
-        { label: "Gerçek Boyut", role: "resetZoom" },
-        { type: "separator" },
-        { label: "Tam Ekran", role: "togglefullscreen" },
-        { label: "Geliştirici Araçları", role: "toggleDevTools" },
-      ],
-    },
-  ]));
-}
+/* ── Başlangıç ───────────────────────────────────────────── */
 
 // Tek kopya: ikinci kez açılırsa mevcut pencere öne gelir.
 if (!app.requestSingleInstanceLock()) {
@@ -262,27 +472,38 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => ac());
 
   app.whenReady().then(() => {
-    // Google, gömülü tarayıcı imzası ("Electron/…") taşıyan isteklere farklı
-    // davranabiliyor; standart Chrome kimliği gönderilir.
+    // Google gibi servisler gömülü tarayıcı imzası ("Electron/…") taşıyan
+    // isteklere farklı davranabiliyor; standart Chrome kimliği gönderilir.
     const ses = session.fromPartition(BOLUM);
     ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|yolliyo-masaustu|Yolliyo)\/\S+/gi, ""));
 
-    menuKur();
+    Menu.setApplicationMenu(null);
     tepsiKur();
-    pencereAc({ goster: !ARKAPLAN });
+    pencereAc();
+    if (ARKAPLAN) {
+      // Windows açılışı: pencere gösterilmez; depo bilgisayarıysa TV ekranı açılır.
+      if (ayarlar.oku().acilistaDepoEkrani) depoEkraniAc();
+    } else {
+      acilisGoster();
+    }
 
     // İlk açılışta varsayılan: Windows ile başlat (tepsiden kapatılabilir).
     windowsIleBaslat(ayarlar.oku().windowsIleBaslat);
 
-    bildirim.baslat({ ses, taban: TABAN, ikon: IKON, ac });
-    const r = rozet.baslat({ ses, taban: TABAN, pencere: () => anaPencere, tepsi: () => tepsi });
-    // Sipariş işlendikçe rozet hemen düşsün: panelde her sayfa geçişinde yenile.
-    anaPencere.webContents.on("did-navigate-in-page", () => r.yokla());
-    anaPencere.webContents.on("did-navigate", () => r.yokla());
+    if (!globalShortcut.register(ARAMA_KISAYOL, () => aramaAc("genel"))) {
+      // Başka bir program aynı kısayolu kullanıyorsa arama yine başlık çubuğundan açılır.
+      console.warn("Hızlı arama kısayolu alınamadı:", ARAMA_KISAYOL);
+    }
+    aramaHazirla(); // ilk açılış anında olsun diye önceden yüklenir
 
+    bildirim.baslat({ ses, taban: TABAN, ikon: IKON, ac });
+    sayac = sayaclar.baslat({
+      ses, taban: TABAN, pencere: () => anaPencere, tepsi: () => tepsi, degisti: baslikDurumu,
+    });
     guncel = guncelleme.baslat({ ikon: IKON, onHazir: tepsiYenile });
   });
 
+  app.on("will-quit", () => globalShortcut.unregisterAll());
   app.on("before-quit", () => { cikiliyor = true; });
   // Pencereler kapansa da tepsi yaşar — uygulama yalnızca "Çıkış" ile kapanır.
   app.on("window-all-closed", () => {});
