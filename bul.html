@@ -14,13 +14,16 @@
     --kritik: #f07a7a;
   }
   html, body { margin: 0; background: transparent; overflow: hidden; }
-  body { padding: 6px 14px 16px; font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--metin); user-select: none; }
+  /* Şeffaf pay gölgenin TAMAMINI içermeli: katmanın dışına taşan gölge kesilip
+     çubuğun etrafında gri bir dikdörtgen gibi görünüyordu. Pay ≥ bulanıklık + kayma. */
+  body { padding: 8px 24px 36px; font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--metin); user-select: none; }
 
   .cubuk {
     display: flex; align-items: center; gap: 4px;
     height: 42px; padding: 0 6px 0 12px; box-sizing: border-box;
     background: var(--yuzey); border: 1px solid var(--kenar); border-radius: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.35);
+    /* Katmanlı, yumuşak gölge: açık panel üzerinde de koyu leke bırakmaz. */
+    box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.16);
     transform-origin: top right;
     opacity: 0; transform: translateY(-10px) scale(0.98);
     transition: opacity 0.16s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.2s;

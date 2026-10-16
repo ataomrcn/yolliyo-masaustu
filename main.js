@@ -96,8 +96,9 @@ const panel = () => panelView?.webContents;
 // Tarayıcıdaki Ctrl+F'nin karşılığı. Chromium'un kendi arama motoru
 // (findInPage) kullanılır; çubuk ayrı, şeffaf bir katman.
 
-const BUL_G = 420;
-const BUL_Y = 64;
+// Katman = çubuk + gölge payı (bul.html body padding: 8 üst, 24 yan, 36 alt).
+const BUL_G = 460;
+const BUL_Y = 86;
 let bulAcik = false;
 let bulSon = ""; // son aranan metin — panelde F3 için
 let bulIstek = 0;  // son findInPage istek no
@@ -169,7 +170,8 @@ function yerlesim() {
   baslikView.setBounds({ x: 0, y: 0, width, height: ust });
   panelView.setBounds({ x: 0, y: ust, width, height: Math.max(0, height - ust) });
   // Bul çubuğu panelin sağ üst köşesinde (Chrome'daki yeri); gölge payı dahil.
-  bulView?.setBounds({ x: Math.max(0, width - BUL_G - 8), y: ust, width: BUL_G, height: BUL_Y });
+  // Çubuğun sağ kenarı pencere kenarından ~16 px içeride kalsın (24 px pay − 8).
+  bulView?.setBounds({ x: Math.max(0, width - BUL_G + 8), y: ust, width: BUL_G, height: BUL_Y });
 }
 
 function baslikDurumu() {
