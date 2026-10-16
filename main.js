@@ -79,6 +79,7 @@ function durumYaz(pencere) {
 let anaPencere = null;   // BaseWindow
 let baslikView = null;   // WebContentsView — kendi başlık çubuğumuz
 let panelView = null;    // WebContentsView — panel
+let bulView = null;      // WebContentsView — sayfada bul çubuğu (Ctrl+F)
 let acilis = null;       // açılış ekranı
 let aramaPencere = null; // hızlı arama
 let depoPencere = null;  // Depo Ekranı (TV)
@@ -91,6 +92,74 @@ let yukleniyor = false;
 
 const panel = () => panelView?.webContents;
 
+/* ── Sayfada bul (Ctrl+F) ─────────────────────────────────── */
+// Tarayıcıdaki Ctrl+F'nin karşılığı. Chromium'un kendi arama motoru
+// (findInPage) kullanılır; çubuk ayrı, şeffaf bir katman.
+
+const BUL_G = 420;
+const BUL_Y = 64;
+let bulAcik = false;
+let bulSon = ""; // son aranan metin — panelde F3 için
+let bulIstek = 0;  // son findInPage istek no
+let bulAltSinir = 1; // bundan küçük numaralı yanıtlar eski aramaya ait
+let bulYedek = null;
+
+function bulAc() {
+  if (!anaPencere || !panelView) return;
+  if (!bulView) {
+    bulView = new WebContentsView({
+      // backgroundThrottling kapalı: yazarken arama gecikmesi (90 ms) Chromium'un
+      // arka plan yavaşlatmasıyla ~1 sn'ye çıkmasın (ölçüldü).
+      webPreferences: { preload: path.join(__dirname, "baslik-preload.js"), contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    });
+    bulView.setBackgroundColor("#00000000");
+    bulView.webContents.loadFile(path.join(__dirname, "bul.html"));
+    bulView.webContents.on("before-input-event", (e, g) => {
+      // Çubuk odaktayken de Ctrl+F metni seçsin; F3 sonraki eşleşme.
+      if (g.type === "keyDown" && (g.control || g.meta) && g.key.toLowerCase() === "f") { e.preventDefault(); bulView.webContents.send("bul:gosterildi", null); }
+    });
+  }
+  if (!bulAcik) {
+    anaPencere.contentView.addChildView(bulView);
+    bulAcik = true;
+    yerlesim();
+  }
+  bulView.webContents.focus();
+  const gonder = () => bulView.webContents.send("bul:gosterildi", null);
+  if (bulView.webContents.isLoading()) bulView.webContents.once("did-finish-load", gonder); else gonder();
+}
+
+function bulKapat() {
+  if (!bulAcik) return;
+  panel()?.stopFindInPage("clearSelection");
+  anaPencere?.contentView.removeChildView(bulView);
+  bulAcik = false;
+  panel()?.focus();
+}
+
+ipcMain.on("bul:ara", (_e, metin, secenek) => {
+  const t = String(metin ?? "").slice(0, 200);
+  bulSon = t;
+  if (!t) { panel()?.stopFindInPage("clearSelection"); return; }
+  // DİKKAT: Electron'da findNext adının tersini söyler — true = YENİ arama
+  // oturumu başlat, false = mevcut aramada sonraki/önceki eşleşmeye geç.
+  // Ters gönderilince Chromium hiç sonuç döndürmüyordu (ölçüldü).
+  const devam = Boolean(secenek?.findNext);
+  // Alt sınır çağrıdan ÖNCE kurulur: Chromium yanıtı findInPage numarayı
+  // döndürmeden önce bildirebiliyor (ölçüldü); o yanıt da kabul edilmeli.
+  bulAltSinir = bulIstek + 1;
+  bulIstek = panel()?.findInPage(t, { forward: secenek?.forward !== false, findNext: !devam, matchCase: false }) ?? bulIstek;
+  // Eşleşme yokken Chromium bazen hiç "found-in-page" göndermiyor (ölçüldü):
+  // kısa sürede yanıt gelmezse "bulunamadı" say.
+  clearTimeout(bulYedek);
+  const no = bulIstek;
+  bulYedek = setTimeout(() => {
+    if (no === bulIstek) bulView?.webContents.send("bul:sonuc", { activeMatchOrdinal: 0, matches: 0 });
+  }, 350);
+});
+ipcMain.on("bul:temizle", () => panel()?.stopFindInPage("clearSelection"));
+ipcMain.on("bul:kapat", bulKapat);
+
 /* ── Ana pencere ─────────────────────────────────────────── */
 
 function yerlesim() {
@@ -99,6 +168,8 @@ function yerlesim() {
   const ust = anaPencere.isFullScreen() ? 0 : BASLIK_Y;
   baslikView.setBounds({ x: 0, y: 0, width, height: ust });
   panelView.setBounds({ x: 0, y: ust, width, height: Math.max(0, height - ust) });
+  // Bul çubuğu panelin sağ üst köşesinde (Chrome'daki yeri); gölge payı dahil.
+  bulView?.setBounds({ x: Math.max(0, width - BUL_G - 8), y: ust, width: BUL_G, height: BUL_Y });
 }
 
 function baslikDurumu() {
@@ -171,6 +242,14 @@ function pencereAc() {
   const wc = panel();
   baglantilariYonet(wc);
   kisayollar(wc);
+  wc.on("found-in-page", (_e, s) => {
+    // Önceki aramanın geç gelen yanıtı yeni sonucu (ve "bulunamadı" yedeğini) ezmesin.
+    if (s.requestId < bulAltSinir) return;
+    clearTimeout(bulYedek);
+    bulView?.webContents.send("bul:sonuc", { activeMatchOrdinal: s.activeMatchOrdinal, matches: s.matches });
+  });
+  // Başka sayfaya geçince eski aramanın vurguları anlamsız — çubuk kapanır.
+  wc.on("did-navigate", bulKapat);
   wc.on("did-start-loading", () => { yukleniyor = true; baslikDurumu(); });
   wc.on("did-stop-loading", () => { yukleniyor = false; baslikDurumu(); });
   for (const olay of ["did-navigate", "did-navigate-in-page"]) {
@@ -398,6 +477,9 @@ function kisayollar(wc) {
     else if (ctrl && k === "-") yap = () => wc.setZoomLevel(wc.getZoomLevel() - 0.5);
     else if (ctrl && k === "0") yap = () => wc.setZoomLevel(0);
     else if (g.key === "F11") yap = () => anaPencere?.setFullScreen(!anaPencere.isFullScreen());
+    else if (ctrl && k === "f") yap = bulAc;
+    else if (g.key === "F3" && bulAcik && bulSon) yap = () => wc.findInPage(bulSon, { forward: !g.shift, findNext: false });
+    else if (g.key === "Escape" && bulAcik) yap = bulKapat;
     else if (g.key === "F12" || (ctrl && g.shift && k === "i")) yap = () => wc.toggleDevTools();
     if (yap) { e.preventDefault(); yap(); }
   });

@@ -19,4 +19,11 @@ contextBridge.exposeInMainWorld("yolliyo", {
   kapat: () => ipcRenderer.send("arama:kapat"),
   yukseklik: (px) => ipcRenderer.send("arama:yukseklik", px),
   gosterildi: (cb) => ipcRenderer.on("arama:gosterildi", () => cb()),
+
+  // Sayfada bul (Ctrl+F)
+  bulAra: (metin, secenek) => ipcRenderer.send("bul:ara", metin, secenek),
+  bulTemizle: () => ipcRenderer.send("bul:temizle"),
+  bulKapat: () => ipcRenderer.send("bul:kapat"),
+  bulSonuc: (cb) => ipcRenderer.on("bul:sonuc", (_e, s) => cb(s)),
+  bulGosterildi: (cb) => ipcRenderer.on("bul:gosterildi", (_e, secili) => cb(secili)),
 });

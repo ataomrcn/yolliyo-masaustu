@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Sayfada bul</title>
+<style>
+  :root {
+    --yuzey: #1a1715;
+    --kenar: rgba(255, 245, 230, 0.10);
+    --metin: #f4f1ec;
+    --soluk: #8f8a83;
+    --marka: #ffb400;
+    --kritik: #f07a7a;
+  }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { padding: 6px 14px 16px; font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--metin); user-select: none; }
+
+  .cubuk {
+    display: flex; align-items: center; gap: 4px;
+    height: 42px; padding: 0 6px 0 12px; box-sizing: border-box;
+    background: var(--yuzey); border: 1px solid var(--kenar); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.35);
+    transform-origin: top right;
+    opacity: 0; transform: translateY(-10px) scale(0.98);
+    transition: opacity 0.16s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.2s;
+  }
+  .acik .cubuk { opacity: 1; transform: none; }
+  .cubuk:focus-within { border-color: rgba(255, 180, 0, 0.45); }
+  .cubuk.yok { border-color: rgba(240, 122, 122, 0.55); animation: salla 0.32s ease; }
+  @keyframes salla { 25% { transform: translateX(-4px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+
+  svg { width: 15px; height: 15px; flex: none; }
+  .ikonAra { color: var(--soluk); margin-right: 4px; }
+  input {
+    flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--metin);
+    font: 400 14px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: text;
+  }
+  input::placeholder { color: #6f6a63; }
+  .sayac { color: var(--soluk); font-variant-numeric: tabular-nums; font-size: 12px; padding: 0 8px; min-width: 44px; text-align: right; white-space: nowrap; transition: color 0.2s; }
+  .yok .sayac { color: var(--kritik); }
+  .ayrac { width: 1px; height: 20px; background: var(--kenar); margin: 0 2px; }
+  button {
+    width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: #c6c1b9;
+    display: grid; place-items: center; cursor: pointer; transition: background 0.15s, color 0.15s;
+  }
+  button:hover:not(:disabled) { background: rgba(255, 245, 230, 0.07); color: var(--metin); }
+  button:active:not(:disabled) { transform: scale(0.94); }
+  button:disabled { color: #4d4944; cursor: default; }
+  @media (prefers-reduced-motion: reduce) { .cubuk { transition: none; } .cubuk.yok { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="cubuk" id="cubuk">
+    <svg class="ikonAra" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" placeholder="Sayfada bul" autocomplete="off" spellcheck="false">
+    <span class="sayac" id="sayac"></span>
+    <div class="ayrac"></div>
+    <button id="onceki" title="Önceki (Shift+Enter)" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+    </button>
+    <button id="sonraki" title="Sonraki (Enter)" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <button id="kapat" title="Kapat (Esc)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+<script>
+  const y = window.yolliyo;
+  const $ = (id) => document.getElementById(id);
+  const q = $("q"), cubuk = $("cubuk"), sayac = $("sayac");
+  let zaman = null;
+
+  function ara(ileri = true, devam = false) {
+    const t = q.value;
+    if (!t) { y.bulTemizle(); goster(null); return; }
+    y.bulAra(t, { forward: ileri, findNext: devam });
+  }
+  function goster(s) {
+    const var_ = s && s.matches > 0;
+    $("onceki").disabled = $("sonraki").disabled = !var_;
+    sayac.textContent = s == null ? "" : var_ ? `${s.activeMatchOrdinal} / ${s.matches}` : "Bulunamadı";
+    const yokYeni = s != null && !var_ && q.value.length > 0;
+    if (yokYeni && !cubuk.classList.contains("yok")) { cubuk.classList.add("yok"); }
+    if (!yokYeni) cubuk.classList.remove("yok");
+  }
+
+  q.addEventListener("input", () => { clearTimeout(zaman); zaman = setTimeout(() => ara(true, false), 90); });
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); ara(!e.shiftKey, true); }
+    else if (e.key === "F3") { e.preventDefault(); ara(!e.shiftKey, true); }
+  });
+  // Esc çubuğun neresinde olursa olsun kapatır (yalnızca metin kutusunda değil).
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); kapat(); } });
+  $("onceki").onclick = () => ara(false, true);
+  $("sonraki").onclick = () => ara(true, true);
+  $("kapat").onclick = () => kapat();
+
+  function kapat() {
+    document.body.classList.remove("acik");
+    setTimeout(() => y.bulKapat(), 160); // çıkış animasyonu bitsin
+  }
+
+  y.bulSonuc((s) => goster(s));
+  y.bulGosterildi((secili) => {
+    if (secili) q.value = secili;
+    // Her açılışta giriş animasyonu baştan oynasın (Esc ile panelden kapatılmış olabilir).
+    document.body.classList.remove("acik");
+    requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.add("acik")));
+    q.focus(); q.select();
+    if (q.value) ara(true, false);
+  });
+</script>
+</body>
+</html>
