@@ -28,6 +28,17 @@ const bildirim = require("./bildirim");
 const sayaclar = require("./sayaclar");
 const guncelleme = require("./guncelleme");
 
+// KASMA DÜZELTMESİ (1.3.2): Chromium'un Windows'taki "pencere örtülü mü"
+// hesabı (CalculateNativeWinOcclusion) bu pencere yapısında (gizli başlık
+// çubuğu + üst üste WebContentsView katmanları) yanılıyor: açılışta ve
+// tepsiden geri açınca panel kendini GİZLİ sanıyor, ekranı neredeyse hiç
+// güncellemiyor, zamanlayıcıları kısıyor. Ölçüldü: panel "hidden", saniyede
+// 0 kare, 10 ms'lik zamanlayıcı ~700 ms'de çalışıyordu; görev çubuğuna
+// tıklayıp geri gelince Windows yeniden hesaplıyor ve kasma geçiyordu.
+// Hesap kapatılınca her durumda "visible", ~145 kare, 10 ms.
+// Uygulama hazır olmadan (whenReady'den önce) verilmeli.
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+
 const TABAN = "https://www.yolliyo.com";
 const PANEL_URL = `${TABAN}/panel`;
 const BOLUM = "persist:yolliyo";
